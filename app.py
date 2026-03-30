@@ -28,7 +28,7 @@ from dotenv import load_dotenv
 app = dash.Dash(__name__, suppress_callback_exceptions=True, external_stylesheets=[dbc.themes.CYBORG])
 server = app.server
 
-APP_VERSION = "2026.03.30.1"
+APP_VERSION = "2026_v1.02"
 
 load_dotenv()
 
