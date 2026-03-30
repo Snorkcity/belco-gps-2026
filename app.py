@@ -84,7 +84,8 @@ def load_gps_data():
 
 
 df = load_gps_data()
-
+print("Loaded players:", sorted(df["Player Name"].dropna().unique()))
+print("Row count:", len(df))
 
 # =================================================
 # I THINK THIS WILL BE HELPER CODE AND STYLING AREA
