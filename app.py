@@ -63,12 +63,60 @@ WORKSHEET_NAME = "individual stats"
 
 
 # ============================
+# APP SETUP
+# ============================
+
+app = dash.Dash(__name__, suppress_callback_exceptions=True, external_stylesheets=[dbc.themes.CYBORG])
+server = app.server
+
+APP_VERSION = "2026_v1.03"
+
+load_dotenv()
+
+# Google Sheets API scope
+scope = [
+    "https://spreadsheets.google.com/feeds",
+    "https://www.googleapis.com/auth/drive"
+]
+
+# Choose credentials source
+if os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON"):
+    creds_dict = json.loads(os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"])
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+elif os.path.exists("service_account.json"):
+    creds = ServiceAccountCredentials.from_json_keyfile_name("service_account.json", scope)
+else:
+    raise EnvironmentError("No credentials found. Set GOOGLE_SERVICE_ACCOUNT_JSON or add service_account.json.")
+
+# Authorize client
+client = gspread.authorize(creds)
+
+
+# ============================
+# APP CONFIG
+# ============================
+
+APP_TITLE = "Belco NPLW - GPS Insights Dashboard"
+PANEL_BG = "#0F2C44"
+ACCENT = "skyblue"
+SPREADSHEET_NAME = "2026_GPS-stats"
+
+YEAR_SHEET_MAP = {
+    "2026": "individual stats",
+    "2025": "stats 2025",
+    "2024": "stats 2024",
+}
+
+DEFAULT_YEAR = "2026"
+
+
+# ============================
 # DATA LOAD
 # ============================
 
-def load_gps_data():
+def load_gps_data(year=DEFAULT_YEAR):
     ss = client.open(SPREADSHEET_NAME)
-    ws = ss.worksheet(WORKSHEET_NAME)
+    ws = ss.worksheet(YEAR_SHEET_MAP[year])
 
     df = pd.DataFrame(ws.get_all_records())
 
@@ -82,12 +130,38 @@ def load_gps_data():
     if "Match ID" in df.columns:
         df["Match ID"] = df["Match ID"].astype(str).str.strip()
 
+    if "Team" in df.columns:
+        df["Team"] = df["Team"].astype(str).str.strip()
+
+    df["Year"] = year
+
     return df
 
 
-df = load_gps_data()
-print("Loaded players:", sorted(df["Player Name"].dropna().unique()))
-print("Row count:", len(df))
+def load_all_gps_data():
+    frames = []
+
+    for year in YEAR_SHEET_MAP:
+        try:
+            frames.append(load_gps_data(year))
+        except Exception as e:
+            print(f"Could not load {year}: {e}")
+
+    if frames:
+        return pd.concat(frames, ignore_index=True)
+
+    return pd.DataFrame()
+
+
+df = load_all_gps_data()
+
+if not df.empty:
+    print("Loaded years:", sorted(df["Year"].dropna().unique()))
+    print("Loaded players:", sorted(df["Player Name"].dropna().unique()))
+    print("Row count:", len(df))
+else:
+    print("No GPS data loaded.")
+
 
 # =================================================
 # I THINK THIS WILL BE HELPER CODE AND STYLING AREA
@@ -182,6 +256,7 @@ def chart_header(title_text):
             ),
         ]
     )
+
 
 # =========================================
 # PLAYER GPS ---- HELPER FOR TOTAL DISTANCE
@@ -2638,21 +2713,34 @@ def render_tab_content(active_tab):
                 html.Div(
                     [
                         html.Div(
-                            dcc.Dropdown(
-                                id="player-dropdown",
-                                options=[
-                                    {"label": player, "value": player}
-                                    for player in sorted(df["Player Name"].dropna().unique())
-                                ],
-                                placeholder="Select a Player",
-                                clearable=True,
-                                style={
-                                    "width": "260px",
-                                    "color": "black",
-                                    "fontFamily": title_font["fontFamily"],
-                                    "fontSize": "14px",
-                                },
-                            ),
+                            [
+                                dcc.Dropdown(
+                                    id="player-year-dropdown",
+                                    options=[{"label": y, "value": y} for y in ["2026", "2025", "2024"]],
+                                    value="2026",
+                                    clearable=False,
+                                    style={
+                                        "width": "140px",
+                                        "color": "black",
+                                        "fontFamily": title_font["fontFamily"],
+                                        "fontSize": "14px",
+                                        "marginRight": "10px",
+                                    },
+                                ),
+
+                                dcc.Dropdown(
+                                    id="player-dropdown",
+                                    options=[],  # will be populated by callback
+                                    placeholder="Select a Player",
+                                    clearable=True,
+                                    style={
+                                        "width": "260px",
+                                        "color": "black",
+                                        "fontFamily": title_font["fontFamily"],
+                                        "fontSize": "14px",
+                                    },
+                                ),
+                            ],
                             style={
                                 "display": "flex",
                                 "justifyContent": "center",
@@ -2858,16 +2946,26 @@ def render_tab_content(active_tab):
                             [
                                 html.Div(
                                     [
-                                        html.Label(
-                                            "Team",
+                                        
+                                        dcc.Dropdown(
+                                            id="team-year-dropdown",
+                                            options=[{"label": y, "value": y} for y in ["2026", "2025", "2024"]],
+                                            value="2026",
+                                            clearable=False,
                                             style={
-                                                "color": "white",
+                                                "width": "140px",
+                                                "color": "black",
                                                 "fontFamily": title_font["fontFamily"],
-                                                "fontSize": "16px",
-                                                "marginBottom": "6px",
-                                                "display": "block",
+                                                "fontSize": "14px",
                                             },
                                         ),
+                                    ],
+                                    style={"marginRight": "20px"},
+                                ),
+                                
+                                html.Div(
+                                    [
+                                        
                                         dcc.Dropdown(
                                             id="team-dropdown",
                                             options=[
@@ -2889,16 +2987,6 @@ def render_tab_content(active_tab):
 
                                 html.Div(
                                     [
-                                        html.Label(
-                                            "Round",
-                                            style={
-                                                "color": "white",
-                                                "fontFamily": title_font["fontFamily"],
-                                                "fontSize": "16px",
-                                                "marginBottom": "6px",
-                                                "display": "block",
-                                            },
-                                        ),
                                         dcc.Dropdown(
                                             id="round-dropdown",
                                             options=[],
@@ -2917,15 +3005,7 @@ def render_tab_content(active_tab):
 
                                 html.Div(
                                     [
-                                        html.Label(
-                                            " ",
-                                            style={
-                                                "color": "white",
-                                                "fontSize": "16px",
-                                                "marginBottom": "6px",
-                                                "display": "block",
-                                            },
-                                        ),
+                                        
                                         html.Button(
                                             "Update Charts",
                                             id="update-team-tab",
@@ -3135,51 +3215,86 @@ def render_tab_content(active_tab):
 # REAL CALLBACKS START HERE
 #============================
 
-#================================
+#----------------------
+# - These are new for the year dropdowns
+
+# Player dropdowns
+
+@app.callback(
+    Output("player-dropdown", "options"),
+    Input("player-year-dropdown", "value")
+)
+def update_player_dropdown(selected_year):
+    dff = df[df["Year"] == selected_year]
+
+    players = sorted(dff["Player Name"].dropna().unique())
+
+    return [{"label": p, "value": p} for p in players]
+
+
+# Team dropdowns
+
+@app.callback(
+    Output("team-dropdown", "options"),
+    Input("team-year-dropdown", "value")
+)
+def update_team_dropdown(selected_year):
+    dff = df[df["Year"] == selected_year]
+
+    teams = sorted(dff["Team"].dropna().unique())
+
+    return [{"label": t, "value": t} for t in teams]
+
+
+# ================================
 # - Populates the Round dropdown
 
-@callback(
+@app.callback(
     Output("round-dropdown", "options"),
-    Input("team-dropdown", "value"),
-    prevent_initial_call=False
+    Input("team-year-dropdown", "value"),
+    Input("team-dropdown", "value")
 )
-def update_round_dropdown(selected_team):
-    if not selected_team:
+def update_round_dropdown(year, team):
+    if not year or not team:
         return []
 
-    if "Team" not in df.columns or "Round" not in df.columns:
-        return []
+    dff = df[(df["Year"] == year) & (df["Team"] == team)]
 
-    filtered_df = df[df["Team"] == selected_team]
-
-    rounds = filtered_df["Round"].dropna().astype(str).unique().tolist()
+    rounds = dff["Round"].dropna().astype(str).unique().tolist()
 
     def round_sort_key(x):
         x = str(x).strip().lower()
+
         if x.startswith("r") and x[1:].isdigit():
-            return int(x[1:])
+            return (0, int(x[1:]))
+
         if x.isdigit():
-            return int(x)
-        return x
+            return (0, int(x))
+
+        return (1, x)
 
     rounds = sorted(rounds, key=round_sort_key)
 
     return [{"label": r, "value": r} for r in rounds]
+        
 
-#========================================
+
+
+# ========================================
 # CALLBACK PLAYER GPS ---- TOTAL DISTANCE
 
 @callback(
     Output("player-total-distance-chart", "figure"),
     [
+        Input("player-year-dropdown", "value"),
         Input("player-dropdown", "value"),
         Input("player-distance-btn-date", "n_clicks"),
         Input("player-distance-btn-value", "n_clicks"),
         Input("player-distance-btn-form", "n_clicks"),
     ],
 )
-def update_player_total_distance_chart(selected_player, btn_date, btn_value, btn_form):
-    if not selected_player:
+def update_player_total_distance_chart(selected_year, selected_player, btn_date, btn_value, btn_form):
+    if not selected_year or not selected_player:
         return go.Figure()
 
     triggered = ctx.triggered_id
@@ -3191,24 +3306,28 @@ def update_player_total_distance_chart(selected_player, btn_date, btn_value, btn
     else:
         sort_order = "date"
 
-    df_filtered = df[df["Player Name"] == selected_player].copy()
+    df_filtered = df[
+        (df["Year"] == selected_year) &
+        (df["Player Name"] == selected_player)
+    ].copy()
 
     return create_player_total_distance_chart(df_filtered, selected_player, sort_order)
 
-#=========================================
+# =========================================
 # CALLBACK PLAYER GPS ---- HIGH SPEED METRES
 
 @callback(
     Output("sprint-distance-chart", "figure"),
     [
+        Input("player-year-dropdown", "value"),
         Input("player-dropdown", "value"),
         Input("sprint-btn-date", "n_clicks"),
         Input("sprint-btn-value", "n_clicks"),
         Input("sprint-btn-form", "n_clicks"),
     ],
 )
-def update_sprint_chart(selected_player, btn_date, btn_value, btn_form):
-    if not selected_player:
+def update_sprint_chart(selected_year, selected_player, btn_date, btn_value, btn_form):
+    if not selected_year or not selected_player:
         return go.Figure()
 
     triggered = ctx.triggered_id
@@ -3220,25 +3339,29 @@ def update_sprint_chart(selected_player, btn_date, btn_value, btn_form):
     else:
         sort_order = "date"
 
-    df_filtered = df[df["Player Name"] == selected_player].copy()
+    df_filtered = df[
+        (df["Year"] == selected_year) &
+        (df["Player Name"] == selected_player)
+    ].copy()
 
     return create_sprint_distance_chart(df_filtered, selected_player, sort_order)
 
 
-#=========================================
+# =========================================
 # CALLBACK PLAYER GPS ---- VERY HIGH SPEED METRES
 
 @callback(
     Output("player-vhs-chart", "figure"),
     [
+        Input("player-year-dropdown", "value"),
         Input("player-dropdown", "value"),
         Input("player-vhs-btn-date", "n_clicks"),
         Input("player-vhs-btn-value", "n_clicks"),
         Input("player-vhs-btn-form", "n_clicks"),
     ],
 )
-def update_player_vhs_chart(selected_player, btn_date, btn_value, btn_form):
-    if not selected_player:
+def update_player_vhs_chart(selected_year, selected_player, btn_date, btn_value, btn_form):
+    if not selected_year or not selected_player:
         return go.Figure()
 
     triggered = ctx.triggered_id
@@ -3250,25 +3373,29 @@ def update_player_vhs_chart(selected_player, btn_date, btn_value, btn_form):
     else:
         sort_order = "date"
 
-    df_filtered = df[df["Player Name"] == selected_player].copy()
+    df_filtered = df[
+        (df["Year"] == selected_year) &
+        (df["Player Name"] == selected_player)
+    ].copy()
 
     return create_player_vhs_chart(df_filtered, selected_player, sort_order)
 
 
-#=========================
+# =========================
 # CALLBACK PLAYER GPS ---- POWER PLAY
 
 @callback(
     Output("power-plays-chart", "figure"),
     [
+        Input("player-year-dropdown", "value"),
         Input("player-dropdown", "value"),
         Input("pp-btn-date", "n_clicks"),
         Input("pp-btn-value", "n_clicks"),
         Input("pp-btn-form", "n_clicks"),
     ],
 )
-def update_power_plays_chart(selected_player, btn_date, btn_value, btn_form):
-    if not selected_player:
+def update_power_plays_chart(selected_year, selected_player, btn_date, btn_value, btn_form):
+    if not selected_year or not selected_player:
         return go.Figure()
 
     triggered = ctx.triggered_id
@@ -3280,24 +3407,28 @@ def update_power_plays_chart(selected_player, btn_date, btn_value, btn_form):
     else:
         sort_order = "date"
 
-    df_filtered = df[df["Player Name"] == selected_player].copy()
+    df_filtered = df[
+        (df["Year"] == selected_year) &
+        (df["Player Name"] == selected_player)
+    ].copy()
 
     return create_power_plays_chart(df_filtered, selected_player, sort_order)
 
-#=========================
+# =========================
 # CALLBACK PLAYER GPS ---- DISTANCE PER MINUTE
 
 @callback(
     Output("distance-per-min-chart", "figure"),
     [
+        Input("player-year-dropdown", "value"),
         Input("player-dropdown", "value"),
         Input("dpm-btn-date", "n_clicks"),
         Input("dpm-btn-value", "n_clicks"),
         Input("dpm-btn-form", "n_clicks"),
     ],
 )
-def update_distance_per_min_chart(selected_player, btn_date, btn_value, btn_form):
-    if not selected_player:
+def update_distance_per_min_chart(selected_year, selected_player, btn_date, btn_value, btn_form):
+    if not selected_year or not selected_player:
         return go.Figure()
 
     triggered = ctx.triggered_id
@@ -3309,24 +3440,28 @@ def update_distance_per_min_chart(selected_player, btn_date, btn_value, btn_form
     else:
         sort_order = "date"
 
-    df_filtered = df[df["Player Name"] == selected_player].copy()
+    df_filtered = df[
+        (df["Year"] == selected_year) &
+        (df["Player Name"] == selected_player)
+    ].copy()
 
     return create_distance_per_min_chart(df_filtered, selected_player, sort_order)
 
-#=========================
+# =========================
 # CALLBACK PLAYER GPS ---- TOP SPEED
 
 @callback(
     Output("top-speed-chart", "figure"),
     [
+        Input("player-year-dropdown", "value"),
         Input("top-speed-btn-date", "n_clicks"),
         Input("top-speed-btn-value", "n_clicks"),
         Input("top-speed-btn-form", "n_clicks"),
         Input("player-dropdown", "value"),
     ],
 )
-def update_top_speed_chart(btn_date, btn_value, btn_form, selected_player):
-    if not selected_player:
+def update_top_speed_chart(selected_year, btn_date, btn_value, btn_form, selected_player):
+    if not selected_year or not selected_player:
         return go.Figure()
 
     triggered = ctx.triggered_id
@@ -3338,24 +3473,28 @@ def update_top_speed_chart(btn_date, btn_value, btn_form, selected_player):
     else:
         sort_order = "date"
 
-    df_filtered = df[df["Player Name"] == selected_player].copy()
+    df_filtered = df[
+        (df["Year"] == selected_year) &
+        (df["Player Name"] == selected_player)
+    ].copy()
 
     return create_top_speed_chart(df_filtered, selected_player, sort_order)
 
-#=========================
+# =========================
 # CALLBACK PLAYER GPS ---- PLAYER LOAD
 
 @callback(
     Output("player-load-chart", "figure"),
     [
+        Input("player-year-dropdown", "value"),
         Input("player-dropdown", "value"),
         Input("player-load-btn-date", "n_clicks"),
         Input("player-load-btn-value", "n_clicks"),
         Input("player-load-btn-form", "n_clicks"),
     ],
 )
-def update_player_load_chart(selected_player, btn_date, btn_value, btn_form):
-    if not selected_player:
+def update_player_load_chart(selected_year, selected_player, btn_date, btn_value, btn_form):
+    if not selected_year or not selected_player:
         return go.Figure()
 
     triggered = ctx.triggered_id
@@ -3367,25 +3506,29 @@ def update_player_load_chart(selected_player, btn_date, btn_value, btn_form):
     else:
         sort_order = "date"
 
-    df_filtered = df[df["Player Name"] == selected_player].copy()
+    df_filtered = df[
+        (df["Year"] == selected_year) &
+        (df["Player Name"] == selected_player)
+    ].copy()
 
     return create_player_load_chart(df_filtered, selected_player, sort_order)
 
 
-#===================================
+# ===================================
 # CALLBACK PLAYER GPS ---- ACCELERATIONS DECELERATIONS
 
 @callback(
     Output("accel-decel-chart", "figure"),
     [
+        Input("player-year-dropdown", "value"),
         Input("accel-btn-date", "n_clicks"),
         Input("accel-btn-value", "n_clicks"),
         Input("accel-btn-form", "n_clicks"),
         Input("player-dropdown", "value"),
     ],
 )
-def update_accel_decel_chart(btn_date, btn_value, btn_form, selected_player):
-    if not selected_player:
+def update_accel_decel_chart(selected_year, btn_date, btn_value, btn_form, selected_player):
+    if not selected_year or not selected_player:
         return go.Figure()
 
     triggered = ctx.triggered_id
@@ -3397,11 +3540,14 @@ def update_accel_decel_chart(btn_date, btn_value, btn_form, selected_player):
     else:
         sort_order = "date"
 
-    df_filtered = df[df["Player Name"] == selected_player].copy()
+    df_filtered = df[
+        (df["Year"] == selected_year) &
+        (df["Player Name"] == selected_player)
+    ].copy()
 
     return create_accel_decel_chart(df_filtered, selected_player, sort_order)
 
-#=================================================
+# =================================================
 # CALLBACK TEAM GPS ---- TOTAL DISTANCE
 
 @callback(
@@ -3410,11 +3556,12 @@ def update_accel_decel_chart(btn_date, btn_value, btn_form, selected_player):
     Input("team-distance-btn-total", "n_clicks"),
     Input("team-distance-btn-rate", "n_clicks"),
     Input("team-distance-btn-halves", "n_clicks"),
+    State("team-year-dropdown", "value"),
     State("team-dropdown", "value"),
     State("round-dropdown", "value"),
 )
-def update_team_distance_chart(n_update, btn_total, btn_rate, btn_halves, selected_team, selected_round):
-    if not selected_team or not selected_round:
+def update_team_distance_chart(n_update, btn_total, btn_rate, btn_halves, selected_year, selected_team, selected_round):
+    if not selected_year or not selected_team or not selected_round:
         return go.Figure()
 
     triggered = ctx.triggered_id
@@ -3427,6 +3574,7 @@ def update_team_distance_chart(n_update, btn_total, btn_rate, btn_halves, select
         view_mode = "total"
 
     df_filtered = df[
+        (df["Year"] == selected_year) &
         (df["Team"] == selected_team) &
         (df["Round"].astype(str) == str(selected_round))
     ].copy()
@@ -3436,7 +3584,7 @@ def update_team_distance_chart(n_update, btn_total, btn_rate, btn_halves, select
 
     return create_team_distance_chart(df_filtered, selected_round, view_mode)
 
-#=================================================
+# =================================================
 # CALLBACK TEAM GPS ---- HIGH SPEED METRES
 
 @callback(
@@ -3445,11 +3593,12 @@ def update_team_distance_chart(n_update, btn_total, btn_rate, btn_halves, select
     Input("team-sprint-btn-total", "n_clicks"),
     Input("team-sprint-btn-rate", "n_clicks"),
     Input("team-sprint-btn-halves", "n_clicks"),
+    State("team-year-dropdown", "value"),
     State("team-dropdown", "value"),
     State("round-dropdown", "value"),
 )
-def update_team_sprint_chart(n_update, btn_total, btn_rate, btn_halves, selected_team, selected_round):
-    if not selected_team or not selected_round:
+def update_team_sprint_chart(n_update, btn_total, btn_rate, btn_halves, selected_year, selected_team, selected_round):
+    if not selected_year or not selected_team or not selected_round:
         return go.Figure()
 
     triggered = ctx.triggered_id
@@ -3462,6 +3611,7 @@ def update_team_sprint_chart(n_update, btn_total, btn_rate, btn_halves, selected
         view_mode = "total"
 
     df_filtered = df[
+        (df["Year"] == selected_year) &
         (df["Team"] == selected_team) &
         (df["Round"].astype(str) == str(selected_round))
     ].copy()
@@ -3472,7 +3622,7 @@ def update_team_sprint_chart(n_update, btn_total, btn_rate, btn_halves, selected
     return create_team_sprint_distance_chart(df_filtered, selected_round, view_mode)
 
 
-#=================================================
+# =================================================
 # CALLBACK TEAM GPS ---- VERY HIGH SPEED METRES
 
 @callback(
@@ -3481,11 +3631,12 @@ def update_team_sprint_chart(n_update, btn_total, btn_rate, btn_halves, selected
     Input("team-vhs-btn-total", "n_clicks"),
     Input("team-vhs-btn-rate", "n_clicks"),
     Input("team-vhs-btn-halves", "n_clicks"),
+    State("team-year-dropdown", "value"),
     State("team-dropdown", "value"),
     State("round-dropdown", "value"),
 )
-def update_team_vhs_chart(n_update, btn_total, btn_rate, btn_halves, selected_team, selected_round):
-    if not selected_team or not selected_round:
+def update_team_vhs_chart(n_update, btn_total, btn_rate, btn_halves, selected_year, selected_team, selected_round):
+    if not selected_year or not selected_team or not selected_round:
         return go.Figure()
 
     triggered = ctx.triggered_id
@@ -3498,6 +3649,7 @@ def update_team_vhs_chart(n_update, btn_total, btn_rate, btn_halves, selected_te
         view_mode = "total"
 
     df_filtered = df[
+        (df["Year"] == selected_year) &
         (df["Team"] == selected_team) &
         (df["Round"].astype(str) == str(selected_round))
     ].copy()
@@ -3508,7 +3660,7 @@ def update_team_vhs_chart(n_update, btn_total, btn_rate, btn_halves, selected_te
     return create_team_vhs_chart(df_filtered, selected_round, view_mode)
 
 
-#=================================================
+# =================================================
 # CALLBACK TEAM GPS ---- TOP SPEED
 
 @callback(
@@ -3516,11 +3668,12 @@ def update_team_vhs_chart(n_update, btn_total, btn_rate, btn_halves, selected_te
     Input("update-team-tab", "n_clicks"),
     Input("team-top-speed-btn-halves", "n_clicks"),
     Input("team-top-speed-btn-max", "n_clicks"),
+    State("team-year-dropdown", "value"),
     State("team-dropdown", "value"),
     State("round-dropdown", "value"),
 )
-def update_team_top_speed_chart(n_update, btn_halves, btn_max, selected_team, selected_round):
-    if not selected_team or not selected_round:
+def update_team_top_speed_chart(n_update, btn_halves, btn_max, selected_year, selected_team, selected_round):
+    if not selected_year or not selected_team or not selected_round:
         return go.Figure()
 
     triggered = ctx.triggered_id
@@ -3531,6 +3684,7 @@ def update_team_top_speed_chart(n_update, btn_halves, btn_max, selected_team, se
         view_mode = "halves"
 
     df_filtered = df[
+        (df["Year"] == selected_year) &
         (df["Team"] == selected_team) &
         (df["Round"].astype(str) == str(selected_round))
     ].copy()
@@ -3540,7 +3694,8 @@ def update_team_top_speed_chart(n_update, btn_halves, btn_max, selected_team, se
 
     return create_team_top_speed_chart(df_filtered, selected_round, view_mode)
 
-#=================================================
+
+# =================================================
 # CALLBACK TEAM GPS ---- POWER PLAYS
 
 @callback(
@@ -3548,11 +3703,12 @@ def update_team_top_speed_chart(n_update, btn_halves, btn_max, selected_team, se
     Input("update-team-tab", "n_clicks"),
     Input("team-pp-btn-total", "n_clicks"),
     Input("team-pp-btn-rate", "n_clicks"),
+    State("team-year-dropdown", "value"),
     State("team-dropdown", "value"),
     State("round-dropdown", "value"),
 )
-def update_team_power_plays_chart(n_update, btn_total, btn_rate, selected_team, selected_round):
-    if not selected_team or not selected_round:
+def update_team_power_plays_chart(n_update, btn_total, btn_rate, selected_year, selected_team, selected_round):
+    if not selected_year or not selected_team or not selected_round:
         return go.Figure()
 
     triggered = ctx.triggered_id
@@ -3563,6 +3719,7 @@ def update_team_power_plays_chart(n_update, btn_total, btn_rate, selected_team, 
         view_mode = "total"
 
     df_filtered = df[
+        (df["Year"] == selected_year) &
         (df["Team"] == selected_team) &
         (df["Round"].astype(str) == str(selected_round))
     ].copy()
@@ -3580,7 +3737,7 @@ def update_team_power_plays_chart(n_update, btn_total, btn_rate, selected_team, 
 
     return create_team_power_plays_chart(df_filtered, selected_round, view_mode)
 
-#=================================================
+# =================================================
 # CALLBACK TEAM GPS ---- DISTANCE PER MINUTE
 
 @callback(
@@ -3588,11 +3745,12 @@ def update_team_power_plays_chart(n_update, btn_total, btn_rate, selected_team, 
     Input("update-team-tab", "n_clicks"),
     Input("team-dpm-btn-total", "n_clicks"),
     Input("team-dpm-btn-halves", "n_clicks"),
+    State("team-year-dropdown", "value"),
     State("team-dropdown", "value"),
     State("round-dropdown", "value"),
 )
-def update_team_distance_per_min_chart(n_update, btn_total, btn_halves, selected_team, selected_round):
-    if not selected_team or not selected_round:
+def update_team_distance_per_min_chart(n_update, btn_total, btn_halves, selected_year, selected_team, selected_round):
+    if not selected_year or not selected_team or not selected_round:
         return go.Figure()
 
     triggered = ctx.triggered_id
@@ -3603,6 +3761,7 @@ def update_team_distance_per_min_chart(n_update, btn_total, btn_halves, selected
         view_mode = "total"
 
     df_filtered = df[
+        (df["Year"] == selected_year) &
         (df["Team"] == selected_team) &
         (df["Round"].astype(str) == str(selected_round))
     ].copy()
@@ -3612,7 +3771,8 @@ def update_team_distance_per_min_chart(n_update, btn_total, btn_halves, selected
 
     return create_team_distance_per_min_chart(df_filtered, selected_round, view_mode)
 
-#=================================================
+
+# =================================================
 # CALLBACK TEAM GPS ---- PLAYER LOAD
 
 @callback(
@@ -3620,11 +3780,12 @@ def update_team_distance_per_min_chart(n_update, btn_total, btn_halves, selected
     Input("update-team-tab", "n_clicks"),
     Input("team-player-load-btn-total", "n_clicks"),
     Input("team-player-load-btn-rate", "n_clicks"),
+    State("team-year-dropdown", "value"),
     State("team-dropdown", "value"),
     State("round-dropdown", "value"),
 )
-def update_team_player_load_chart(n_update, btn_total, btn_rate, selected_team, selected_round):
-    if not selected_team or not selected_round:
+def update_team_player_load_chart(n_update, btn_total, btn_rate, selected_year, selected_team, selected_round):
+    if not selected_year or not selected_team or not selected_round:
         return go.Figure()
 
     triggered = ctx.triggered_id
@@ -3635,6 +3796,7 @@ def update_team_player_load_chart(n_update, btn_total, btn_rate, selected_team, 
         view_mode = "total"
 
     df_filtered = df[
+        (df["Year"] == selected_year) &
         (df["Team"] == selected_team) &
         (df["Round"].astype(str) == str(selected_round))
     ].copy()
@@ -3644,7 +3806,7 @@ def update_team_player_load_chart(n_update, btn_total, btn_rate, selected_team, 
 
     return create_team_player_load_chart(df_filtered, selected_round, view_mode)
 
-#=================================================
+# =================================================
 # CALLBACK TEAM GPS ---- ACCELERATIONS DECELERATIONS
 
 @callback(
@@ -3652,11 +3814,12 @@ def update_team_player_load_chart(n_update, btn_total, btn_rate, selected_team, 
     Input("update-team-tab", "n_clicks"),
     Input("team-accel-btn-total", "n_clicks"),
     Input("team-accel-btn-rate", "n_clicks"),
+    State("team-year-dropdown", "value"),
     State("team-dropdown", "value"),
     State("round-dropdown", "value"),
 )
-def update_team_accel_decel_chart(n_update, btn_total, btn_rate, selected_team, selected_round):
-    if not selected_team or not selected_round:
+def update_team_accel_decel_chart(n_update, btn_total, btn_rate, selected_year, selected_team, selected_round):
+    if not selected_year or not selected_team or not selected_round:
         return go.Figure()
 
     triggered = ctx.triggered_id
@@ -3667,6 +3830,7 @@ def update_team_accel_decel_chart(n_update, btn_total, btn_rate, selected_team, 
         view_mode = "total"
 
     df_filtered = df[
+        (df["Year"] == selected_year) &
         (df["Team"] == selected_team) &
         (df["Round"].astype(str) == str(selected_round))
     ].copy()
