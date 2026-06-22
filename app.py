@@ -451,21 +451,35 @@ def create_sprint_distance_chart(df_filtered, selected_player, sort_order):
     df_sprint = pd.merge(df_sprint, df_game, on=["Round", "Date"], how="left")
     df_sprint = df_sprint.rename(columns={"Mins played": "Total Mins played"})
 
+    numeric_cols = [
+        "Sprint Distance (m) 1st Half",
+        "Sprint Distance (m) 2nd Half",
+        "Mins played 1st Half",
+        "Mins played 2nd Half",
+        "Total Mins played",
+    ]
+
+    for col in numeric_cols:
+        df_sprint[col] = pd.to_numeric(df_sprint[col], errors="coerce")
+
     df_sprint["Total Sprint Distance"] = (
         df_sprint["Sprint Distance (m) 1st Half"].fillna(0)
         + df_sprint["Sprint Distance (m) 2nd Half"].fillna(0)
     )
 
     df_sprint["Avg per min 1st Half"] = (
-        df_sprint["Sprint Distance (m) 1st Half"] / df_sprint["Mins played 1st Half"]
+        df_sprint["Sprint Distance (m) 1st Half"] /
+        df_sprint["Mins played 1st Half"].replace(0, np.nan)
     ).fillna(0)
 
     df_sprint["Avg per min 2nd Half"] = (
-        df_sprint["Sprint Distance (m) 2nd Half"] / df_sprint["Mins played 2nd Half"]
+        df_sprint["Sprint Distance (m) 2nd Half"] /
+        df_sprint["Mins played 2nd Half"].replace(0, np.nan)
     ).fillna(0)
 
     df_sprint["Total Avg per min"] = (
-        df_sprint["Total Sprint Distance"] / df_sprint["Total Mins played"]
+        df_sprint["Total Sprint Distance"] /
+        df_sprint["Total Mins played"].replace(0, np.nan)
     ).fillna(0)
 
     df_sprint["Date"] = pd.to_datetime(df_sprint["Date"], errors="coerce", dayfirst=True)
